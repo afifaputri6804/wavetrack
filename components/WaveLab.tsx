@@ -213,7 +213,43 @@ export default function WaveLab() {
     setUser(null);
     setView("ringkasan");
   }
-  function saveKps() { localStorage.setItem("wavetrack-kps", JSON.stringify(answers)); setSaved(true); window.setTimeout(() => setSaved(false), 2400); }
+  async function saveKps() {
+    if (user?.authSource !== "supabase") {
+      localStorage.setItem("wavetrack-kps", JSON.stringify(answers));
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2400);
+      return;
+    }
+
+    try {
+      const supabase = createClient();
+      const {
+        data: { user: authUser },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError) throw authError;
+      if (!authUser) throw new Error("Sesi akun siswa tidak ditemukan.");
+
+      const { error: saveError } = await supabase.from("submissions").upsert(
+        {
+          assignment_id: "edf7cdef-4874-46b6-9777-8a554c15bef5",
+          student_id: authUser.id,
+          content: { kps: answers },
+        },
+        { onConflict: "assignment_id,student_id" }
+      );
+
+      if (saveError) throw saveError;
+
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2400);
+      window.alert("Jawaban KPS berhasil disimpan ke Supabase.");
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : "Kesalahan tidak diketahui.";
+      window.alert(`Jawaban belum tersimpan ke Supabase.\n${detail}`);
+    }
+  }
   function saveReportTemplate() { localStorage.setItem("wavetrack-report-template", JSON.stringify(reportTemplate)); setTemplateSaved(true); window.setTimeout(() => setTemplateSaved(false), 2400); }
   function toggleTheme() {
     const next = theme === "light" ? "dark" : "light";
