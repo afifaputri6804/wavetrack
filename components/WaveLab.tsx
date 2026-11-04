@@ -9,6 +9,7 @@ type User = { role: Role; name: string; className?: string; email: string; authS
 type StudentRecord = { id: string; name: string; email: string; className: string; activity: string; progress: number; status: string; last: string };
 type ReportRecord = { id: string; student: string; email: string; className: string; filename: string; type: string; size: number; created: string; status: "Menunggu pemeriksaan" | "Sudah diperiksa"; feedback: string };
 type ReportTemplateSection = { id: string; title: string; prompt: string };
+type KpsAssignment = { id: string; title: string; instructions: string; due_at: string | null };
 type ReportTemplate = { title: string; introduction: string; sections: ReportTemplateSection[] };
 const createDefaultReportTemplate = (): ReportTemplate => ({
   title: "Contoh Format Laporan Praktikum Virtual",
@@ -76,6 +77,11 @@ export default function WaveLab() {
   const [submitted, setSubmitted] = useState(false);
   const [labOpen, setLabOpen] = useState(true);
   const [saved, setSaved] = useState(false);
+  const [kpsAssignments, setKpsAssignments] = useState<KpsAssignment[]>([]);
+  const [kpsAssignmentId, setKpsAssignmentId] = useState("");
+  const [kpsAssignmentsLoading, setKpsAssignmentsLoading] = useState(false);
+  const [kpsAssignmentsError, setKpsAssignmentsError] = useState("");
+  const [kpsSubmissionLoading, setKpsSubmissionLoading] = useState(false);
   const [students, setStudents] = useState<StudentRecord[]>([]);
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [reportTemplate, setReportTemplate] = useState<ReportTemplate>(createDefaultReportTemplate);
@@ -155,6 +161,70 @@ export default function WaveLab() {
     } catch { /* ignore invalid report template */ }
     setStoredDataReady(true);
   }, []);
+  useEffect(() => {
+    if (user?.authSource !== "supabase" || user.role !== "siswa" || view !== "kps") return;
+    let cancelled = false;
+    async function loadAssignments() {
+      setKpsAssignmentsLoading(true);
+      setKpsAssignmentsError("");
+      try {
+        const { data, error: queryError } = await createClient()
+          .from("assignments")
+          .select("id, title, instructions, due_at")
+          .eq("assignment_type", "kps")
+          .eq("is_published", true)
+          .order("created_at", { ascending: false });
+        if (queryError) throw queryError;
+        if (cancelled) return;
+        const list = (data || []) as KpsAssignment[];
+        setKpsAssignments(list);
+        setKpsAssignmentId(current => list.some(item => item.id === current) ? current : list[0]?.id || "");
+        if (list.length === 0) setKpsAssignmentsError("Belum ada tugas KPS yang dipublikasikan untuk kelas Anda.");
+      } catch (err) {
+        if (cancelled) return;
+        const detail = err instanceof Error ? err.message : "Kesalahan tidak diketahui.";
+        setKpsAssignmentsError(`Tugas KPS belum dapat dimuat. ${detail}`);
+      } finally {
+        if (!cancelled) setKpsAssignmentsLoading(false);
+      }
+    }
+    void loadAssignments();
+    return () => { cancelled = true; };
+  }, [user, view]);
+
+  useEffect(() => {
+    if (user?.authSource !== "supabase" || user.role !== "siswa" || view !== "kps" || !kpsAssignmentId) return;
+    let cancelled = false;
+    async function loadSavedSubmission() {
+      setKpsSubmissionLoading(true);
+      setAnswers({});
+      try {
+        const supabase = createClient();
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
+        if (!authUser) throw new Error("Sesi akun siswa tidak ditemukan.");
+        const { data, error: submissionError } = await supabase
+          .from("submissions")
+          .select("content")
+          .eq("assignment_id", kpsAssignmentId)
+          .eq("student_id", authUser.id)
+          .maybeSingle();
+        if (submissionError) throw submissionError;
+        if (cancelled) return;
+        const content = data?.content as { kps?: Record<string, string> } | null;
+        setAnswers(content?.kps || {});
+      } catch (err) {
+        if (cancelled) return;
+        const detail = err instanceof Error ? err.message : "Kesalahan tidak diketahui.";
+        setKpsAssignmentsError(`Jawaban tersimpan belum dapat dimuat. ${detail}`);
+      } finally {
+        if (!cancelled) setKpsSubmissionLoading(false);
+      }
+    }
+    void loadSavedSubmission();
+    return () => { cancelled = true; };
+  }, [user, view, kpsAssignmentId]);
+
   useEffect(() => { if (storedDataReady) localStorage.setItem("wavetrack-students", JSON.stringify(students)); }, [students, storedDataReady]);
   useEffect(() => { if (storedDataReady) localStorage.setItem("wavetrack-reports", JSON.stringify(reports)); }, [reports, storedDataReady]);
 
@@ -221,6 +291,11 @@ export default function WaveLab() {
       return;
     }
 
+    if (!kpsAssignmentId) {
+      window.alert("Pilih tugas KPS yang tersedia sebelum menyimpan jawaban.");
+      return;
+    }
+
     try {
       const supabase = createClient();
       const {
@@ -233,7 +308,7 @@ export default function WaveLab() {
 
       const { error: saveError } = await supabase.from("submissions").upsert(
         {
-          assignment_id: "edf7cdef-4874-46b6-9777-8a554c15bef5",
+          assignment_id: kpsAssignmentId,
           student_id: authUser.id,
           content: { kps: answers },
         },
@@ -274,7 +349,7 @@ export default function WaveLab() {
         {view === "ringkasan" && (user.role === "siswa" ? <StudentHome user={user} go={setView}/> : <TeacherHome go={setView} students={students}/>)}
         {view === "materi" && <><VisualMaterials go={setView}/><Materials/></>}{view === "petunjuk" && <Instructions go={setView}/>}
         {view === "lab" && (labOpen ? <div className="overflow-hidden rounded-2xl border border-teal-200 bg-white"><a href="/studio/index.html" target="_blank" rel="noreferrer" className="block bg-teal-900 px-4 py-2 text-right text-sm font-bold text-white">Buka studio di tab penuh ↗</a><iframe title="Studio pelacak gelombang" src="/studio/index.html" allow="camera" className="block w-full border-0" style={{height:"80vh"}} /></div> : <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><p className="font-bold">Lab sedang dinonaktifkan oleh guru.</p><p className="mt-1 text-sm text-slate-500">Silakan kembali lagi setelah sesi dibuka.</p></div>)}
-        {view === "kps" && <KPS answers={answers} setAnswers={setAnswers} save={saveKps} saved={saved} reports={reports} userEmail={user.email} reportTemplate={reportTemplate} submitReport={async file => { const record: ReportRecord = {id:`report-${Date.now()}`,student:user.name,email:user.email,className:user.className||"XI IPA 1",filename:file.name,type:file.type,size:file.size,created:new Date().toLocaleString("id-ID"),status:"Menunggu pemeriksaan",feedback:""}; await saveReportFile(record.id,file); setReports(prev=>[record,...prev]); return true; }}/>}
+        {view === "kps" && <KPS answers={answers} setAnswers={setAnswers} save={saveKps} saved={saved} reports={reports} userEmail={user.email} reportTemplate={reportTemplate} submitReport={async file => { const record: ReportRecord = {id:`report-${Date.now()}`,student:user.name,email:user.email,className:user.className||"XI IPA 1",filename:file.name,type:file.type,size:file.size,created:new Date().toLocaleString("id-ID"),status:"Menunggu pemeriksaan",feedback:""}; await saveReportFile(record.id,file); setReports(prev=>[record,...prev]); return true; }} authSource={user.authSource || "demo"} assignments={kpsAssignments} selectedAssignmentId={kpsAssignmentId} setSelectedAssignmentId={setKpsAssignmentId} assignmentsLoading={kpsAssignmentsLoading} assignmentsError={kpsAssignmentsError} submissionLoading={kpsSubmissionLoading}/>}
         {view === "evaluasi" && <Evaluation quiz={quiz} setQuiz={setQuiz} submitted={submitted} setSubmitted={setSubmitted} questions={quizQuestions}/>}
         {view === "monitoring" && <Monitoring students={students} setStudents={setStudents} reports={reports} setReports={setReports}/>}
         {view === "pengelolaan" && <LabManagement open={labOpen} setOpen={setLabOpen}/>}
@@ -389,7 +464,7 @@ function Instructions({go}:{go:(v:View)=>void}) {
   ];
   return <><PageIntro eyebrow="PANDUAN PRAKTIKUM" title="Petunjuk praktikum virtual" desc="Ikuti empat langkah ini, lalu isi lembar kerja KPS berdasarkan data percobaan."/><div className="grid gap-5 lg:grid-cols-[1fr_320px]"><Box><ol className="space-y-5">{steps.map(([t,d],i)=><li key={t} className="flex gap-4"><span className="step-number grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#e6f7f3] font-bold text-[#087e70]">{i+1}</span><div><b>{t}</b><p className="mt-1 text-sm leading-6 text-slate-500">{d}</p></div></li>)}</ol></Box><Box><p className="text-xs font-bold tracking-wider text-[#0a9b8d]">INGAT</p><ul className="mt-3 space-y-3 text-sm leading-5 text-slate-600"><li>• Catat nilai beserta satuannya.</li><li>• Jaga parameter lain tetap saat menguji satu variabel.</li><li>• Gunakan data dan grafik sebagai dasar kesimpulan.</li></ul><button onClick={()=>go("lab")} className="mt-5 w-full rounded-xl bg-[#102b49] px-4 py-3 text-sm font-bold text-white">Buka virtual lab →</button></Box></div></>;
 }
-function KPS({answers,setAnswers,save,saved,reports,userEmail,reportTemplate,submitReport}:{answers:Record<string,string>;setAnswers:(a:Record<string,string>)=>void;save:()=>void;saved:boolean;reports:ReportRecord[];userEmail:string;reportTemplate:ReportTemplate;submitReport:(file:File)=>Promise<boolean>}) {
+function KPS({answers,setAnswers,save,saved,reports,userEmail,reportTemplate,submitReport,authSource,assignments,selectedAssignmentId,setSelectedAssignmentId,assignmentsLoading,assignmentsError,submissionLoading}:{answers:Record<string,string>;setAnswers:(a:Record<string,string>)=>void;save:()=>void;saved:boolean;reports:ReportRecord[];userEmail:string;reportTemplate:ReportTemplate;submitReport:(file:File)=>Promise<boolean>;authSource:"demo"|"supabase";assignments:KpsAssignment[];selectedAssignmentId:string;setSelectedAssignmentId:(id:string)=>void;assignmentsLoading:boolean;assignmentsError:string;submissionLoading:boolean}) {
   const [reportFile,setReportFile]=useState<File|null>(null); const [reportMessage,setReportMessage]=useState(""); const [uploading,setUploading]=useState(false);
   async function upload(){if(!reportFile)return;setReportMessage("");if(!["image/png","image/jpeg","application/pdf","text/csv"].includes(reportFile.type)&&!reportFile.name.toLowerCase().endsWith(".csv")){setReportMessage("Gunakan berkas CSV, JPG, PNG, atau PDF.");return;}if(reportFile.size>15*1024*1024){setReportMessage("Ukuran berkas maksimal 15 MB.");return;}setUploading(true);try{await submitReport(reportFile);setReportFile(null);setReportMessage("Berkas berhasil dikirim untuk diperiksa guru.");}catch{setReportMessage("Unggahan gagal disimpan. Periksa kapasitas penyimpanan browser.");}finally{setUploading(false);}}
   function openReportTemplate(){
@@ -409,7 +484,8 @@ function KPS({answers,setAnswers,save,saved,reports,userEmail,reportTemplate,sub
     ["menyimpulkan","Menyimpulkan","Rumuskan kesimpulan untuk menjawab tujuan atau pertanyaan praktikum. Dukung pernyataan dengan hasil pengamatan dan angka dari data, lalu hubungkan dengan konsep gelombang yang sesuai."],
     ["mengkomunikasikan","Mengomunikasikan hasil percobaan","Sajikan hasil penyelidikan dengan runtut dan jelas melalui laporan, tabel, grafik, atau paparan singkat agar dapat dipahami teman dan guru."],
   ];
-  return <><PageIntro eyebrow="LEMBAR KERJA SISWA" title="Keterampilan proses sains" desc="Jawab enam indikator KPS berdasarkan pengamatan dan data praktikum virtual. Contoh format laporan dapat dibuka dari susunan terbaru yang disiapkan guru."/><div className="mb-5 flex flex-col justify-between gap-3 rounded-2xl border border-teal-200 bg-white p-4 sm:flex-row sm:items-center"><div><p className="text-xs font-bold tracking-wider text-[#0a9b8d]">CONTOH FORMAT LAPORAN</p><p className="mt-1 text-sm text-slate-600">Buka contoh terbaru yang disunting guru. Kamu dapat mencetak atau menyimpannya sebagai PDF.</p></div><button onClick={openReportTemplate} className="shrink-0 rounded-lg bg-[#102b49] px-4 py-2.5 text-xs font-bold text-white">Buka contoh laporan →</button></div><div className="grid gap-5 lg:grid-cols-[1fr_300px]"><div className="space-y-4">{fields.map(([key,label,prompt],i)=><Box key={key}><div className="flex gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-50 text-sm font-bold text-teal-700">{i+1}</span><div className="flex-1"><b>{label}</b><p className="mt-1 text-sm leading-6 text-slate-500">{prompt}</p><textarea value={answers[key]||""} onChange={e=>setAnswers({...answers,[key]:e.target.value})} onPaste={e=>e.preventDefault()} onDrop={e=>e.preventDefault()} onContextMenu={e=>e.preventDefault()} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&["v","x"].includes(e.key.toLowerCase())||e.shiftKey&&e.key==="Insert")e.preventDefault();}} rows={key==="menafsirkan"||key==="mengkomunikasikan"?5:4} placeholder="Tuliskan jawabanmu di sini…" className="mt-3 w-full resize-y rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-500 focus:ring-4 focus:ring-teal-50"/></div></div></Box>)}</div><aside><Box className="sticky top-24"><p className="text-xs font-bold tracking-wider text-[#0a9b8d]">SIMPAN DAN KIRIM</p><p className="mt-2 text-xs leading-5 text-slate-500">Jawaban KPS tersimpan di browser ini. Contoh laporan mengikuti format terakhir yang disimpan guru pada browser ini.</p><button onClick={save} className="mt-4 w-full rounded-xl bg-[#102b49] py-3 text-sm font-bold text-white">{saved?"Tersimpan ✓":"Simpan jawaban KPS"}</button><div className="mt-5 border-t border-slate-100 pt-4"><h3 className="text-sm font-bold">Lampirkan data praktikum</h3><p className="mt-1 text-xs leading-5 text-slate-500">Kirim CSV dari Studio atau laporan dalam format PDF, JPG, maupun PNG.</p><input type="file" accept="text/csv,.csv,image/png,image/jpeg,application/pdf" onChange={e=>setReportFile(e.target.files?.[0]||null)} className="mt-3 block w-full text-xs file:mr-2 file:rounded-lg file:border-0 file:bg-teal-50 file:px-3 file:py-2 file:font-bold file:text-teal-800"/><button disabled={!reportFile||uploading} onClick={upload} className="mt-3 w-full rounded-xl bg-[#102b49] py-2.5 text-sm font-bold text-white disabled:opacity-40">{uploading?"Mengirim…":"Kirim berkas ke guru"}</button>{reportMessage&&<p role="status" className={`mt-2 text-xs ${reportMessage.includes("berhasil")?"text-emerald-700":"text-rose-700"}`}>{reportMessage}</p>}<div className="mt-3 space-y-2">{reports.filter(r=>r.email===userEmail).map(r=><div key={r.id} className="rounded-lg bg-slate-50 p-2.5 text-xs"><b>{r.filename}</b><span className="ml-2 text-teal-700">{r.status}</span>{r.feedback&&<p className="mt-1 text-slate-600">Catatan guru: {r.feedback}</p>}</div>)}</div></div><div className="mt-5 border-t border-slate-100 pt-4"><p className="text-xs font-bold tracking-wider text-[#0a9b8d]">ENAM INDIKATOR KPS</p><ul className="mt-3 space-y-2 text-sm leading-5 text-slate-600">{["Mengamati","Mengukur","Memprediksi","Menafsirkan data","Menyimpulkan","Mengomunikasikan hasil percobaan"].map(x=><li key={x}>✓ {x}</li>)}</ul></div></Box></aside></div></>;
+  const selectedAssignment = assignments.find(item => item.id === selectedAssignmentId);
+  return <><PageIntro eyebrow="LEMBAR KERJA SISWA" title="Keterampilan proses sains" desc="Jawab enam indikator KPS berdasarkan pengamatan dan data praktikum virtual. Contoh format laporan dapat dibuka dari susunan terbaru yang disiapkan guru."/>{authSource === "supabase" && <Box className="mb-5"><label className="block text-sm font-bold">Tugas KPS<select value={selectedAssignmentId} onChange={e=>setSelectedAssignmentId(e.target.value)} disabled={assignmentsLoading||assignments.length===0} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal disabled:bg-slate-50"><option value="">{assignmentsLoading?"Memuat tugas…":"Pilih tugas KPS"}</option>{assignments.map(item=><option key={item.id} value={item.id}>{item.title}</option>)}</select></label>{selectedAssignment?.instructions&&<p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">{selectedAssignment.instructions}</p>}{selectedAssignment?.due_at&&<p className="mt-2 text-xs font-semibold text-amber-700">Batas pengumpulan: {new Date(selectedAssignment.due_at).toLocaleString("id-ID")}</p>}{assignmentsError&&<p role="status" className="mt-3 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">{assignmentsError}</p>}{submissionLoading&&<p className="mt-3 text-xs text-slate-500">Memuat jawaban yang sudah tersimpan…</p>}</Box>}<div className="mb-5 flex flex-col justify-between gap-3 rounded-2xl border border-teal-200 bg-white p-4 sm:flex-row sm:items-center"><div><p className="text-xs font-bold tracking-wider text-[#0a9b8d]">CONTOH FORMAT LAPORAN</p><p className="mt-1 text-sm text-slate-600">Buka contoh terbaru yang disunting guru. Kamu dapat mencetak atau menyimpannya sebagai PDF.</p></div><button onClick={openReportTemplate} className="shrink-0 rounded-lg bg-[#102b49] px-4 py-2.5 text-xs font-bold text-white">Buka contoh laporan →</button></div><div className="grid gap-5 lg:grid-cols-[1fr_300px]"><div className="space-y-4">{fields.map(([key,label,prompt],i)=><Box key={key}><div className="flex gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-50 text-sm font-bold text-teal-700">{i+1}</span><div className="flex-1"><b>{label}</b><p className="mt-1 text-sm leading-6 text-slate-500">{prompt}</p><textarea value={answers[key]||""} onChange={e=>setAnswers({...answers,[key]:e.target.value})} onPaste={e=>e.preventDefault()} onDrop={e=>e.preventDefault()} onContextMenu={e=>e.preventDefault()} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&["v","x"].includes(e.key.toLowerCase())||e.shiftKey&&e.key==="Insert")e.preventDefault();}} rows={key==="menafsirkan"||key==="mengkomunikasikan"?5:4} placeholder="Tuliskan jawabanmu di sini…" className="mt-3 w-full resize-y rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-500 focus:ring-4 focus:ring-teal-50"/></div></div></Box>)}</div><aside><Box className="sticky top-24"><p className="text-xs font-bold tracking-wider text-[#0a9b8d]">SIMPAN DAN KIRIM</p><p className="mt-2 text-xs leading-5 text-slate-500">{authSource === "supabase" ? "Jawaban KPS tersimpan di Supabase untuk tugas yang dipilih. Contoh laporan mengikuti format terakhir yang disimpan pada browser ini." : "Jawaban KPS tersimpan di browser ini. Contoh laporan mengikuti format terakhir yang disimpan guru pada browser ini."}</p><button onClick={save} disabled={authSource === "supabase" && (!selectedAssignmentId || submissionLoading || assignmentsLoading)} className="mt-4 w-full rounded-xl bg-[#102b49] py-3 text-sm font-bold text-white disabled:opacity-50">{saved?"Tersimpan ✓":"Simpan jawaban KPS"}</button><div className="mt-5 border-t border-slate-100 pt-4"><h3 className="text-sm font-bold">Lampirkan data praktikum</h3><p className="mt-1 text-xs leading-5 text-slate-500">Kirim CSV dari Studio atau laporan dalam format PDF, JPG, maupun PNG.</p><input type="file" accept="text/csv,.csv,image/png,image/jpeg,application/pdf" onChange={e=>setReportFile(e.target.files?.[0]||null)} className="mt-3 block w-full text-xs file:mr-2 file:rounded-lg file:border-0 file:bg-teal-50 file:px-3 file:py-2 file:font-bold file:text-teal-800"/><button disabled={!reportFile||uploading} onClick={upload} className="mt-3 w-full rounded-xl bg-[#102b49] py-2.5 text-sm font-bold text-white disabled:opacity-40">{uploading?"Mengirim…":"Kirim berkas ke guru"}</button>{reportMessage&&<p role="status" className={`mt-2 text-xs ${reportMessage.includes("berhasil")?"text-emerald-700":"text-rose-700"}`}>{reportMessage}</p>}<div className="mt-3 space-y-2">{reports.filter(r=>r.email===userEmail).map(r=><div key={r.id} className="rounded-lg bg-slate-50 p-2.5 text-xs"><b>{r.filename}</b><span className="ml-2 text-teal-700">{r.status}</span>{r.feedback&&<p className="mt-1 text-slate-600">Catatan guru: {r.feedback}</p>}</div>)}</div></div><div className="mt-5 border-t border-slate-100 pt-4"><p className="text-xs font-bold tracking-wider text-[#0a9b8d]">ENAM INDIKATOR KPS</p><ul className="mt-3 space-y-2 text-sm leading-5 text-slate-600">{["Mengamati","Mengukur","Memprediksi","Menafsirkan data","Menyimpulkan","Mengomunikasikan hasil percobaan"].map(x=><li key={x}>✓ {x}</li>)}</ul></div></Box></aside></div></>;
 }
 function Evaluation({quiz,setQuiz,submitted,setSubmitted,questions}:{quiz:Record<number,number|string>;setQuiz:(q:Record<number,number|string>)=>void;submitted:boolean;setSubmitted:(v:boolean)=>void;questions:QuizQuestion[]}) {
  const qs=questions;
