@@ -1,11 +1,11 @@
 "use client";
-
+import { createClient } from "@/lib/supabase/client";
 import { FormEvent, useEffect, useState } from "react";
 import Image from "next/image";
 import VisualMaterials from "@/components/VisualMaterials";
 
 type Role = "siswa" | "guru";
-type User = { role: Role; name: string; className?: string; email: string };
+type User = { role: Role; name: string; className?: string; email: string; authSource?: "demo" | "supabase" };
 type StudentRecord = { id: string; name: string; email: string; className: string; activity: string; progress: number; status: string; last: string };
 type ReportRecord = { id: string; student: string; email: string; className: string; filename: string; type: string; size: number; created: string; status: "Menunggu pemeriksaan" | "Sudah diperiksa"; feedback: string };
 type ReportTemplateSection = { id: string; title: string; prompt: string };
@@ -52,7 +52,14 @@ const defaultQuizQuestions: QuizQuestion[] = [
  ];
 type View = "ringkasan" | "materi" | "petunjuk" | "lab" | "kps" | "evaluasi" | "profil" | "monitoring" | "pengelolaan" | "penugasan";
 const titles: Record<View, string> = { ringkasan: "Beranda", materi: "Materi pembelajaran", petunjuk: "Petunjuk praktikum", lab: "Virtual Laboratory", kps: "Lembar kerja KPS", evaluasi: "Evaluasi", profil: "Profil", monitoring: "Monitoring siswa", pengelolaan: "Pengelolaan virtual lab", penugasan: "Pengelolaan penugasan" };
-const defaultUser: User = { role: "siswa", name: "Nadia Putri", className: "XI IPA 1", email: "nadia@sekolah.sch.id" };
+const defaultUser: User = { role: "siswa", name: "Nadia Putri", className: "XI IPA 1", email: "nadia@sekolah.sch.id", authSource: "demo" };
+
+function mapDatabaseRole(value: string | null): Role | null {
+  if (!value) return null;
+  if (["students", "student", "siswa"].includes(value)) return "siswa";
+  if (["teachers", "teacher", "guru"].includes(value)) return "guru";
+  return null;
+}
 
 export default function WaveLab() {
   const [user, setUser] = useState<User | null>(null);
@@ -75,13 +82,58 @@ export default function WaveLab() {
   const [templateSaved, setTemplateSaved] = useState(false);
   const [storedDataReady, setStoredDataReady] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
     const storedTheme = localStorage.getItem("wavetrack-theme");
     const initialTheme = storedTheme === "dark" ? "dark" : "light";
     setTheme(initialTheme);
     document.documentElement.dataset.theme = initialTheme;
-    try { const stored = localStorage.getItem("wavetrack-user"); if (stored) setUser(JSON.parse(stored)); } catch { /* ignore invalid local session */ }
+    void (async () => {
+      try {
+        const supabase = createClient();
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
+
+        if (authUser) {
+          const { data: profile, error: profileError } = await supabase
+            .from("profiles")
+            .select("full_name, role")
+            .eq("id", authUser.id)
+            .single();
+
+          if (profileError || !profile) {
+            setError("Profil akun tidak ditemukan di tabel profiles.");
+            return;
+          }
+
+          const role = mapDatabaseRole(profile.role);
+          if (!role) {
+            setError("Peran akun belum dikenali. Hubungi pengelola WAVETRACK.");
+            return;
+          }
+
+          setUser({
+            role,
+            name: profile.full_name || authUser.email?.split("@")[0] || "Pengguna",
+            email: authUser.email || "",
+            authSource: "supabase",
+            ...(role === "siswa" ? { className: "XI IPA 1" } : {}),
+          });
+          return;
+        }
+
+        const stored = localStorage.getItem("wavetrack-user");
+        if (stored) setUser(JSON.parse(stored));
+      } catch {
+        try {
+          const stored = localStorage.getItem("wavetrack-user");
+          if (stored) setUser(JSON.parse(stored));
+        } catch { /* ignore invalid local demo session */ }
+      } finally {
+        setAuthLoading(false);
+      }
+    })();
     try { const data = localStorage.getItem("wavetrack-kps"); if (data) setAnswers(JSON.parse(data)); } catch { /* ignore invalid saved work */ }
     try { const data = localStorage.getItem("wavetrack-students"); if (data) setStudents(JSON.parse(data)); } catch { /* ignore invalid roster */ }
     try { const data = localStorage.getItem("wavetrack-reports"); if (data) setReports(JSON.parse(data)); } catch { /* ignore invalid report index */ }
@@ -108,14 +160,59 @@ export default function WaveLab() {
 
   function login(e: FormEvent) {
     e.preventDefault(); setError("");
-    if (password.length < 4) { setError("Kata sandi minimal 4 karakter."); return; }
+    if (password.length < 4) { setError("Kata sandi demo minimal 4 karakter."); return; }
     const clean = email.trim();
     if (!clean.includes("@")) { setError("Masukkan alamat email yang valid."); return; }
     const namePart = clean.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-    const next: User = loginRole === "guru" ? { role: "guru", name: namePart || "Guru Fisika", email: clean } : { role: "siswa", name: namePart || "Siswa", className: "XI IPA 1", email: clean };
+    const next: User = loginRole === "guru" ? { role: "guru", name: namePart || "Guru Fisika", email: clean, authSource: "demo" } : { role: "siswa", name: namePart || "Siswa", className: "XI IPA 1", email: clean, authSource: "demo" };
     setUser(next); localStorage.setItem("wavetrack-user", JSON.stringify(next)); setView("ringkasan");
   }
-  function logout() { localStorage.removeItem("wavetrack-user"); setUser(null); setView("ringkasan"); }
+
+  async function loginAkun(e: FormEvent) {
+    e.preventDefault(); setError("");
+    try {
+      const supabase = createClient();
+      const { data, error: authError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (authError || !data.user) { setError("Email atau kata sandi akun tidak sesuai."); return; }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("full_name, role")
+        .eq("id", data.user.id)
+        .single();
+
+      if (profileError || !profile) {
+        await supabase.auth.signOut();
+        setError("Profil akun tidak ditemukan di tabel profiles.");
+        return;
+      }
+
+      const role = mapDatabaseRole(profile.role);
+      if (!role) {
+        await supabase.auth.signOut();
+        setError("Peran akun belum dikenali. Hubungi pengelola WAVETRACK.");
+        return;
+      }
+
+      setUser({
+        role,
+        name: profile.full_name || data.user.email?.split("@")[0] || "Pengguna",
+        email: data.user.email || email.trim(),
+        authSource: "supabase",
+        ...(role === "siswa" ? { className: "XI IPA 1" } : {}),
+      });
+      setView("ringkasan");
+    } catch {
+      setError("Koneksi ke Supabase gagal. Periksa internet lalu coba lagi.");
+    }
+  }
+
+  async function logout() {
+    if (user?.authSource === "supabase") await createClient().auth.signOut();
+    localStorage.removeItem("wavetrack-user");
+    setUser(null);
+    setView("ringkasan");
+  }
   function saveKps() { localStorage.setItem("wavetrack-kps", JSON.stringify(answers)); setSaved(true); window.setTimeout(() => setSaved(false), 2400); }
   function saveReportTemplate() { localStorage.setItem("wavetrack-report-template", JSON.stringify(reportTemplate)); setTemplateSaved(true); window.setTimeout(() => setTemplateSaved(false), 2400); }
   function toggleTheme() {
@@ -125,7 +222,8 @@ export default function WaveLab() {
     localStorage.setItem("wavetrack-theme", next);
   }
 
-  if (!user) return <Login login={login} role={loginRole} setRole={setLoginRole} email={email} setEmail={setEmail} password={password} setPassword={setPassword} error={error} theme={theme} toggleTheme={toggleTheme} />;
+  if (!user && authLoading) return <main className="grid min-h-screen place-items-center bg-white text-sm text-slate-500">Memuat sesi WAVETRACK...</main>;
+  if (!user) return <Login login={login} loginAkun={loginAkun} role={loginRole} setRole={setLoginRole} email={email} setEmail={setEmail} password={password} setPassword={setPassword} error={error} theme={theme} toggleTheme={toggleTheme} />;
   const studentNav: View[] = ["ringkasan", "materi", "petunjuk", "lab", "kps", "evaluasi", "profil"];
   const teacherNav: View[] = ["ringkasan", "monitoring", "pengelolaan", "penugasan", "profil"];
   const nav = user.role === "siswa" ? studentNav : teacherNav;
@@ -145,7 +243,7 @@ export default function WaveLab() {
         {view === "monitoring" && <Monitoring students={students} setStudents={setStudents} reports={reports} setReports={setReports}/>}
         {view === "pengelolaan" && <LabManagement open={labOpen} setOpen={setLabOpen}/>}
         {view === "penugasan" && <AssignmentManagement reportTemplate={reportTemplate} setReportTemplate={setReportTemplate} saveReportTemplate={saveReportTemplate} templateSaved={templateSaved} setTemplateSaved={setTemplateSaved} quizQuestions={quizDraftQuestions} setQuizQuestions={questions=>{setQuizDraftQuestions(questions);setQuizSaved(false)}} saveQuizQuestions={()=>{localStorage.setItem("wavetrack-quiz-questions",JSON.stringify(quizDraftQuestions));setQuizQuestions(quizDraftQuestions);setQuiz({});setSubmitted(false);setQuizSaved(true)}} quizSaved={quizSaved}/> }
-        {view === "profil" && <Profile user={user} setUser={next => {setUser(next); localStorage.setItem("wavetrack-user", JSON.stringify(next));}}/>}
+        {view === "profil" && <Profile user={user} setUser={next => {setUser(next); if (user.authSource !== "supabase") localStorage.setItem("wavetrack-user", JSON.stringify(next));}}/>}
       </main>
     </div>
     <nav className="fixed inset-x-0 bottom-0 z-30 flex overflow-x-auto justify-around border-t border-slate-200 bg-white px-1 py-2 lg:hidden">{nav.map(item=><button key={item} onClick={()=>setView(item)} className={`flex min-w-0 flex-col items-center gap-1 px-2 text-[10px] font-semibold ${view===item?"text-[#087e70]":"text-slate-500"}`}><span className="text-base">{icon(item)}</span><span className="max-w-16 truncate">{titles[item]}</span></button>)}</nav>
@@ -157,9 +255,37 @@ function ThemeToggle({theme,onToggle}:{theme:"light"|"dark";onToggle:()=>void}) 
   return <button type="button" onClick={onToggle} aria-label={theme==="light"?"Aktifkan mode gelap":"Aktifkan mode terang"} aria-pressed={theme==="dark"} className="theme-toggle rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:border-teal-400"><span aria-hidden>{theme==="light"?"☾":"☀"}</span><span className="ml-1.5 hidden sm:inline">{theme==="light"?"Mode gelap":"Mode terang"}</span></button>;
 }
 
-function Login({login,role,setRole,email,setEmail,password,setPassword,error,theme,toggleTheme}: {login:(e:FormEvent)=>void;role:Role;setRole:(v:Role)=>void;email:string;setEmail:(v:string)=>void;password:string;setPassword:(v:string)=>void;error:string;theme:"light"|"dark";toggleTheme:()=>void}) {
-  return <main className="login-shell grid min-h-screen bg-white lg:grid-cols-[1.05fr_.95fr]"><div className="absolute right-4 top-4 z-10"><ThemeToggle theme={theme} onToggle={toggleTheme}/></div><section className="relative hidden overflow-hidden bg-[#102b49] p-12 text-white lg:flex lg:flex-col lg:justify-between"><div className="absolute -right-32 -top-24 h-[520px] w-[520px] rounded-full border border-white/10"/><div className="absolute -right-10 top-16 h-[350px] w-[350px] rounded-full border border-white/10"/><div className="relative flex items-center gap-3"><Image src="/wavetrack-icon.svg" alt="Ikon logo WAVETRACK" width={58} height={58} className="h-[58px] w-[58px]" priority/><div><b className="text-lg tracking-[.14em] text-white">WAVETRACK</b><p className="mt-1 text-xs font-semibold tracking-wide text-slate-200">MATERI GELOMBANG</p></div></div><div className="relative max-w-xl"><p className="text-xs font-bold tracking-[.2em] text-[#75e1d4]">FISIKA SMA/MA · KELAS XI</p><h1 className="mt-4 text-5xl font-bold leading-tight">Belajar gelombang dengan cara menyelidiki.</h1><p className="mt-5 max-w-lg leading-7 text-slate-300">Amati gerak, ubah variabel, rekam data, dan bangun kesimpulan dari bukti eksperimen.</p><div className="mt-8 flex gap-3">{["Simulasi interaktif","Lembar KPS","Evaluasi mandiri"].map(x=><span key={x} className="rounded-full border border-white/15 bg-white/5 px-3 py-2 text-xs">{x}</span>)}</div></div><p className="relative text-xs text-slate-400">WAVETRACK · Materi Gelombang</p></section>
-    <section className="flex min-h-screen items-center justify-center px-5 py-10"><form onSubmit={login} className="w-full max-w-[420px]"><div className="mb-8 flex items-center gap-2.5 lg:hidden"><Image src="/wavetrack-icon.svg" alt="Ikon logo WAVETRACK" width={44} height={44} className="h-[44px] w-[44px]" priority/><div><b className="text-sm tracking-[.12em] text-[#102b49]">WAVETRACK</b><p className="mt-1 text-[10px] font-semibold tracking-wide text-slate-500">MATERI GELOMBANG</p></div></div><div className="text-sm font-bold text-[#0aa18f]">SELAMAT DATANG</div><h2 className="mt-2 text-3xl font-bold tracking-tight text-[#102b49]">Masuk ke akun</h2><p className="mt-2 text-sm text-slate-500">Pilih jenis akun untuk membuka ruang belajar.</p><div className="mt-7 grid grid-cols-2 rounded-xl bg-slate-100 p-1"><button type="button" onClick={()=>setRole("siswa")} className={`rounded-lg py-2.5 text-sm font-bold ${role==="siswa"?"bg-white text-[#102b49] shadow-sm":"text-slate-500"}`}>Siswa</button><button type="button" onClick={()=>setRole("guru")} className={`rounded-lg py-2.5 text-sm font-bold ${role==="guru"?"bg-white text-[#102b49] shadow-sm":"text-slate-500"}`}>Guru</button></div><label className="mt-5 block text-sm font-semibold">Email sekolah<input required type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder={role==="siswa"?"nama@sekolah.sch.id":"guru@sekolah.sch.id"} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition focus:border-teal-500 focus:ring-4 focus:ring-teal-50"/></label><label className="mt-4 block text-sm font-semibold">Kata sandi<input required minLength={4} type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Minimal 4 karakter" className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-teal-500 focus:ring-4 focus:ring-teal-50"/></label>{error&&<p className="mt-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}<button className="mt-6 w-full rounded-xl bg-[#102b49] py-3.5 text-sm font-bold text-white shadow-lg shadow-slate-900/10 hover:bg-[#173a60]">Masuk sebagai {role}</button><div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-500"><b className="text-slate-700">Mode demonstrasi</b><br/>Isi email sekolah dan kata sandi minimal 4 karakter. Profil demo dibuat dari nama email; belum ada verifikasi akun sekolah.</div></form></section></main>;
+function Login({login,loginAkun,role,setRole,email,setEmail,password,setPassword,error,theme,toggleTheme}: {login:(e:FormEvent)=>void;loginAkun:(e:FormEvent)=>void;role:Role;setRole:(v:Role)=>void;email:string;setEmail:(v:string)=>void;password:string;setPassword:(v:string)=>void;error:string;theme:"light"|"dark";toggleTheme:()=>void}) {
+  const [mode, setMode] = useState<"demo" | "akun">("demo");
+  const submit = mode === "demo" ? login : loginAkun;
+
+  return <main className="login-shell grid min-h-screen bg-white lg:grid-cols-[1.05fr_.95fr]">
+    <div className="absolute right-4 top-4 z-10"><ThemeToggle theme={theme} onToggle={toggleTheme}/></div>
+    <section className="relative hidden overflow-hidden bg-[#102b49] p-12 text-white lg:flex lg:flex-col lg:justify-between">
+      <div className="absolute -right-32 -top-24 h-[520px] w-[520px] rounded-full border border-white/10"/>
+      <div className="absolute -right-10 top-16 h-[350px] w-[350px] rounded-full border border-white/10"/>
+      <div className="relative flex items-center gap-3"><Image src="/wavetrack-icon.svg" alt="Ikon logo WAVETRACK" width={58} height={58} className="h-[58px] w-[58px]" priority/><div><b className="text-lg tracking-[.14em] text-white">WAVETRACK</b><p className="mt-1 text-xs font-semibold tracking-wide text-slate-200">MATERI GELOMBANG</p></div></div>
+      <div className="relative max-w-xl"><p className="text-xs font-bold tracking-[.2em] text-[#75e1d4]">FISIKA SMA/MA · KELAS XI</p><h1 className="mt-4 text-5xl font-bold leading-tight">Belajar gelombang dengan cara menyelidiki.</h1><p className="mt-5 max-w-lg leading-7 text-slate-300">Amati gerak, ubah variabel, rekam data, dan bangun kesimpulan dari bukti eksperimen.</p><div className="mt-8 flex gap-3">{["Simulasi interaktif","Lembar KPS","Evaluasi mandiri"].map(x=><span key={x} className="rounded-full border border-white/15 bg-white/5 px-3 py-2 text-xs">{x}</span>)}</div></div>
+      <p className="relative text-xs text-slate-400">WAVETRACK · Materi Gelombang</p>
+    </section>
+    <section className="flex min-h-screen items-center justify-center px-5 py-10">
+      <form onSubmit={submit} className="w-full max-w-[420px]">
+        <div className="mb-8 flex items-center gap-2.5 lg:hidden"><Image src="/wavetrack-icon.svg" alt="Ikon logo WAVETRACK" width={44} height={44} className="h-[44px] w-[44px]" priority/><div><b className="text-sm tracking-[.12em] text-[#102b49]">WAVETRACK</b><p className="mt-1 text-[10px] font-semibold tracking-wide text-slate-500">MATERI GELOMBANG</p></div></div>
+        <div className="text-sm font-bold text-[#0aa18f]">SELAMAT DATANG</div><h2 className="mt-2 text-3xl font-bold tracking-tight text-[#102b49]">Masuk ke WAVETRACK</h2>
+        <div className="mt-6 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
+          <button type="button" onClick={()=>setMode("demo")} className={`rounded-lg py-2.5 text-sm font-bold ${mode==="demo"?"bg-white text-[#102b49] shadow-sm":"text-slate-500"}`}>Coba demo</button>
+          <button type="button" onClick={()=>setMode("akun")} className={`rounded-lg py-2.5 text-sm font-bold ${mode==="akun"?"bg-white text-[#102b49] shadow-sm":"text-slate-500"}`}>Login akun</button>
+        </div>
+        <p className="mt-3 text-sm text-slate-500">{mode==="demo"?"Masuk untuk mencoba tampilan demo WAVETRACK.":"Gunakan email dan kata sandi akun yang telah dibuat untuk Anda."}</p>
+        {mode==="demo"&&<div className="mt-5 grid grid-cols-2 rounded-xl bg-slate-100 p-1"><button type="button" onClick={()=>setRole("siswa")} className={`rounded-lg py-2.5 text-sm font-bold ${role==="siswa"?"bg-white text-[#102b49] shadow-sm":"text-slate-500"}`}>Siswa</button><button type="button" onClick={()=>setRole("guru")} className={`rounded-lg py-2.5 text-sm font-bold ${role==="guru"?"bg-white text-[#102b49] shadow-sm":"text-slate-500"}`}>Guru</button></div>}
+        <label className="mt-5 block text-sm font-semibold">Email<input required type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder={mode==="demo"?(role==="siswa"?"nama@sekolah.sch.id":"guru@sekolah.sch.id"):"Email akun Supabase"} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none transition focus:border-teal-500 focus:ring-4 focus:ring-teal-50"/></label>
+        <label className="mt-4 block text-sm font-semibold">Kata sandi<input required minLength={mode==="demo"?4:6} type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder={mode==="demo"?"Minimal 4 karakter":"Kata sandi akun"} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-teal-500 focus:ring-4 focus:ring-teal-50"/></label>
+        {error&&<p role="alert" className="mt-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
+        <button type="submit" className="mt-6 w-full rounded-xl bg-[#102b49] py-3.5 text-sm font-bold text-white shadow-lg shadow-slate-900/10 hover:bg-[#173a60]">{mode==="demo"?`Masuk demo sebagai ${role}`:"Masuk dengan akun"}</button>
+        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-500">{mode==="demo"?<><b className="text-slate-700">Mode demonstrasi</b><br/>Profil demo dibuat di browser ini dan tidak memeriksa akun Supabase.</>:<>Akun siswa atau guru dibuat dan perannya diatur oleh pengelola WAVETRACK.</>}</div>
+      </form>
+    </section>
+  </main>;
 }
 function PageIntro({eyebrow,title,desc}:{eyebrow:string;title:string;desc:string}) { return <div className="mb-6"><p className="text-xs font-bold tracking-[.16em] text-[#0a9b8d]">{eyebrow}</p><h2 className="mt-1 text-2xl font-bold text-[#102b49]">{title}</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">{desc}</p></div>; }
 function Box({children,className=""}:{children:React.ReactNode;className?:string}) { return <section className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_5px_22px_rgba(16,43,73,.035)] ${className}`}>{children}</section>; }
