@@ -72,3 +72,11 @@ html[data-theme="dark"] .formula-challenge{background:#1e3548!important;border-c
 html[data-theme="dark"] .step-number{background:#174b49!important;color:#b7f4e7!important}
 html[data-theme="dark"] .formula-explorer [class~="text-teal-800"]{color:#b7f4e7!important}
 @media(max-width:480px){.portal-header{height:auto!important;min-height:68px;padding:9px 12px!important;gap:8px}.portal-header h1{font-size:1rem!important;line-height:1.25}.portal-header .theme-toggle{padding:8px!important}.portal-header .theme-toggle span{display:none}.portal-header .grid.h-10{height:34px;width:34px}.portal-header button:not(.theme-toggle){padding:7px 8px!important}.app-shell main{padding-left:12px;padding-right:12px}}
+
+/* Navigasi ponsel menampilkan Beranda dan Menu dalam dua kolom. */
+.mobile-bottom-nav{grid-template-columns:repeat(2,minmax(0,1fr));padding-bottom:calc(.5rem + env(safe-area-inset-bottom));}
+.mobile-bottom-nav>button{width:100%;min-width:0;overflow:hidden;}
+.mobile-nav-label{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.1}
+html[data-theme="dark"] .app-shell #mobile-more-menu{background:var(--surface)!important;border-color:var(--stroke)!important}
+html[data-theme="dark"] .app-shell #mobile-more-menu button{color:var(--text)}
+html[data-theme="dark"] .app-shell #mobile-more-menu button:hover{background:#22344a}
