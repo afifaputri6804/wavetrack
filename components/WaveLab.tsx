@@ -535,27 +535,59 @@ function TeacherHome({go,students}:{go:(v:View)=>void;students:StudentRecord[]})
 }
 function Materials() {
   const concepts = [
-    ["Amplitudo (A)", "Simpangan maksimum partikel medium dari posisi setimbang. Satuan SI: meter (m)."],
-    ["Periode (T)", "Waktu yang diperlukan satu partikel untuk menyelesaikan satu getaran penuh. Satuan: sekon (s)."],
-    ["Frekuensi (f)", "Jumlah getaran setiap sekon. Satuan: hertz (Hz). Frekuensi dan periode berhubungan melalui f = 1/T."],
-    ["Panjang gelombang (λ)", "Jarak antara dua titik berdekatan yang memiliki fase sama. Satuan: meter (m)."],
-    ["Cepat rambat (v)", "Jarak yang ditempuh gangguan tiap sekon. Pada gelombang periodik, v = λf."],
+    ["Amplitudo (A)", "Simpangan maksimum suatu titik medium dari posisi setimbang. Satuan SI: meter (m)."],
+    ["Periode (T)", "Waktu yang diperlukan suatu titik medium untuk melakukan satu getaran penuh. Satuan SI: sekon (s)."],
+    ["Frekuensi (f)", "Banyaknya getaran setiap sekon. Satuan SI: hertz (Hz). Hubungannya dengan periode adalah f = 1/T."],
+    ["Panjang gelombang (λ)", "Jarak antara dua titik berurutan yang memiliki fase sama, misalnya dua puncak yang berdekatan. Satuan SI: meter (m)."],
+    ["Cepat rambat (v)", "Jarak yang ditempuh gelombang setiap sekon. Untuk gelombang periodik, v = λf. Satuan SI: meter per sekon (m/s)."],
   ];
-  return <>
-    <PageIntro eyebrow="MODUL PEMBELAJARAN" title="Gelombang berjalan" desc="Pahami konsep dan besaran gelombang, lalu uji persamaannya dengan pengaturan interaktif."/>
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
-      <div className="space-y-4">
-        <Box><span className="rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-700">01 · KONSEP DASAR</span><h3 className="mt-3 text-lg font-bold">Gangguan merambat, energi berpindah</h3><p className="mt-2 text-sm leading-6 text-slate-600">Gelombang adalah gangguan yang menjalar. Gelombang memindahkan energi dari satu tempat ke tempat lain. Partikel medium bergetar di sekitar posisi setimbang dan tidak berpindah bersama gelombang secara keseluruhan.</p><p className="mt-3 text-sm leading-6 text-slate-600">Pada gelombang berjalan, keadaan getar berubah terhadap posisi dan waktu. Muka gelombang menghubungkan titik-titik yang memiliki fase sama.</p></Box>
-        <Box><span className="rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-700">02 · BESARAN GELOMBANG</span><h3 className="mt-3 text-lg font-bold">Lima besaran untuk membaca gelombang</h3><div className="mt-4 grid gap-3 sm:grid-cols-2">{concepts.map(([name, desc]) => <div key={name} className="rounded-xl bg-slate-50 p-3"><b className="text-sm">{name}</b><p className="mt-1 text-xs leading-5 text-slate-500">{desc}</p></div>)}</div><p className="mt-4 rounded-xl bg-[#f0faf8] p-4 font-mono text-sm text-[#087e70]">f = 1/T &nbsp; · &nbsp; v = λ/T = λf</p><p className="mt-2 text-xs leading-5 text-slate-500">Gunakan satuan konsisten: λ dalam meter, f dalam hertz, T dalam sekon, dan v dalam meter per sekon.</p></Box>
-        <Box><span className="rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-700">03 · ARAH GETAR DAN ARAH RAMBAT</span><div className="mt-3 grid gap-3 sm:grid-cols-2"><div className="rounded-xl border border-slate-100 p-4"><b>Gelombang transversal</b><p className="mt-1 text-sm leading-5 text-slate-500">Arah getaran medium tegak lurus terhadap arah rambat.</p><p className="mt-3 rounded-lg bg-teal-50 p-3 text-center font-mono text-sm text-teal-800">getar ↑↓ &nbsp; rambat →</p></div><div className="rounded-xl border border-slate-100 p-4"><b>Gelombang longitudinal</b><p className="mt-1 text-sm leading-5 text-slate-500">Arah getaran medium sejajar dengan arah rambat. Perbedaan kerapatan membentuk rapatan dan renggangan.</p><p className="mt-3 rounded-lg bg-orange-50 p-3 text-center font-mono text-sm text-orange-800">getar ↔ &nbsp; rambat →</p></div></div><p className="mt-3 text-xs leading-5 text-slate-500">Pengelompokan ini menggunakan hubungan arah getar dengan arah rambat. Gelombang mekanik memerlukan medium, sedangkan gelombang elektromagnetik tidak.</p></Box>
-        <Box><span className="rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-700">04 · MODEL MATEMATIS</span><h3 className="mt-3 text-lg font-bold">Simpangan bergantung pada posisi dan waktu</h3><p className="mt-2 text-sm leading-6 text-slate-600">Untuk gelombang yang merambat ke arah +x dengan fase awal nol, fase dan simpangan dinyatakan sebagai berikut.</p><div className="mt-3 rounded-xl bg-[#102b49] p-4 text-center font-mono text-lg text-white">φ = ft − x/λ<br/><span className="text-teal-200">y(x,t) = A sin(2πφ)</span></div><p className="mt-3 text-sm leading-6 text-slate-600">A menyatakan amplitudo, f frekuensi, λ panjang gelombang, x posisi, dan t waktu. Tanda fase bergantung pada arah rambat serta fase awal.</p></Box>
-        <FormulaExplorer/>
-      </div>
-      <aside className="space-y-4"><Box><p className="text-xs font-bold tracking-wider text-[#0a9b8d]">RINGKASAN RUMUS</p><p className="mt-4 font-mono text-sm">T = 1/f</p><p className="mt-3 font-mono text-sm">v = λf</p><p className="mt-3 font-mono text-sm">φ = ft − x/λ</p><p className="mt-3 font-mono text-sm">y = A sin(2πφ)</p></Box><Box><b className="text-sm">Pikirkan hubungan variabel</b><p className="mt-2 text-sm leading-5 text-slate-500">Jika frekuensi bertambah dan panjang gelombang tetap, bagaimana perubahan cepat rambat? Jika cepat rambat medium tetap, bagaimana perubahan panjang gelombang?</p><p className="mt-3 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600">Gunakan v = λf untuk menyusun jawaban. Uji pengaruh tiap variabel pada simulasi.</p></Box><Box><b className="text-sm">Rujukan materi</b><p className="mt-2 text-xs leading-5 text-slate-500">Radjawane, M. M., Tinambunan, A., & Jono, L. S. (2022). <i>Fisika untuk SMA/MA Kelas XI</i>. Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi.</p></Box></aside>
-    </div>
-  </>;
-}
 
+  return (
+    <>
+      <PageIntro eyebrow="MATERI PEMBELAJARAN · FISIKA KELAS XI" title="Gelombang berjalan" desc="Pelajari konsep dasar gelombang, jenis gelombang, besaran-besarannya, dan persamaan simpangan sebelum melakukan praktikum virtual." />
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="space-y-4">
+          <Box>
+            <span className="rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-700">01 · KONSEP DASAR</span>
+            <h3 className="mt-3 text-lg font-bold">Gelombang: Getaran yang Merambat</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">Gelombang adalah getaran atau gangguan yang merambat. Gelombang membawa energi dari satu tempat ke tempat lain tanpa memindahkan medium secara keseluruhan. Partikel medium bergetar di sekitar posisi setimbangnya.</p>
+            <p className="mt-3 text-sm leading-6 text-slate-600">Gelombang dapat dijumpai dalam kehidupan sehari-hari, misalnya riak air, getaran pada tali, bunyi, dan gelombang pada alat musik. Pada praktikum virtual ini, gerak gelombang diamati melalui perubahan simpangan titik medium.</p>
+          </Box>
+          <Box>
+            <span className="rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-700">02 · BESARAN-BESARAN GELOMBANG</span>
+            <h3 className="mt-3 text-lg font-bold">Besaran untuk membaca gelombang</h3>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">{concepts.map(([name, desc]) => <div key={name} className="rounded-xl bg-slate-50 p-3"><b className="text-sm">{name}</b><p className="mt-1 text-xs leading-5 text-slate-500">{desc}</p></div>)}</div>
+            <p className="mt-4 rounded-xl bg-[#f0faf8] p-4 font-mono text-sm text-[#087e70]">f = 1/T &nbsp; · &nbsp; v = λf</p>
+            <p className="mt-2 text-xs leading-5 text-slate-500">Gunakan satuan yang konsisten: A dan λ dalam meter, T dalam sekon, f dalam hertz, serta v dalam meter per sekon.</p>
+          </Box>
+          <Box>
+            <span className="rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-700">03 · JENIS GELOMBANG</span>
+            <h3 className="mt-3 text-lg font-bold">Arah getar terhadap arah rambat</h3>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-slate-100 p-4"><b>Gelombang transversal</b><p className="mt-2 text-sm leading-5 text-slate-500">Arah getar medium tegak lurus terhadap arah rambat. Contoh: gelombang pada tali.</p><p className="mt-3 rounded-lg bg-teal-50 p-3 text-center font-mono text-sm text-teal-800">getar ↑↓ &nbsp; rambat →</p></div>
+              <div className="rounded-xl border border-slate-100 p-4"><b>Gelombang longitudinal</b><p className="mt-2 text-sm leading-5 text-slate-500">Arah getar medium sejajar dengan arah rambat. Contoh: gelombang bunyi di udara.</p><p className="mt-3 rounded-lg bg-orange-50 p-3 text-center font-mono text-sm text-orange-800">getar ↔ &nbsp; rambat →</p></div>
+            </div>
+          </Box>
+          <Box>
+            <span className="rounded-full bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-700">04 · PERSAMAAN SIMPANGAN</span>
+            <h3 className="mt-3 text-lg font-bold">Simpangan bergantung pada posisi dan waktu</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">Persamaan gelombang berjalan harmonik yang merambat ke arah +x dapat dituliskan sebagai berikut.</p>
+            <div className="mt-3 rounded-xl bg-[#102b49] p-4 text-center font-mono text-base text-white sm:text-lg">y(x,t) = A sin(kx − ωt + φ₀)</div>
+            <p className="mt-3 text-sm leading-6 text-slate-600">Pada persamaan tersebut, y(x,t) adalah simpangan pada posisi x dan waktu t, A adalah amplitudo, k adalah bilangan gelombang, ω adalah frekuensi sudut, dan φ₀ adalah fase awal.</p>
+            <div className="mt-3 rounded-xl bg-slate-50 p-4 font-mono text-sm text-slate-700">k = 2π/λ &nbsp; · &nbsp; ω = 2πf</div>
+            <p className="mt-3 text-sm leading-6 text-slate-600">Jika satu titik medium diamati pada posisi tetap, simpangannya berubah terhadap waktu. Grafik simpangan terhadap waktu dapat digunakan untuk menentukan amplitudo, periode, dan frekuensi. Panjang gelombang ditentukan dari jarak dua titik sefase pada posisi berbeda.</p>
+            <p className="mt-3 rounded-xl bg-[#f0faf8] p-4 font-mono text-sm text-[#087e70]">T = 1/f &nbsp; · &nbsp; v = λf</p>
+          </Box>
+          <FormulaExplorer />
+        </div>
+        <aside className="space-y-4">
+          <Box><p className="text-xs font-bold tracking-wider text-[#0a9b8d]">RINGKASAN RUMUS</p><p className="mt-4 font-mono text-sm">k = 2π/λ</p><p className="mt-3 font-mono text-sm">ω = 2πf</p><p className="mt-3 font-mono text-sm">T = 1/f</p><p className="mt-3 font-mono text-sm">v = λf</p><p className="mt-3 font-mono text-sm">y(x,t) = A sin(kx − ωt + φ₀)</p></Box>
+          <Box><b className="text-sm">Mengamati dengan motion tracking</b><p className="mt-2 text-sm leading-5 text-slate-500">Pilih satu titik pada medium, lalu amati perubahan simpangannya terhadap waktu. Gunakan data dan grafik untuk menentukan amplitudo, periode, dan frekuensi.</p><p className="mt-3 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600">Panjang gelombang diperoleh dengan membandingkan posisi dua titik sefase pada saat yang sama. Setelah λ dan f diketahui, hitung cepat rambat menggunakan v = λf.</p></Box>
+        </aside>
+      </div>
+    </>
+  );
+}
 function FormulaExplorer() {
   const [amplitude, setAmplitude] = useState(0.3);
   const [frequency, setFrequency] = useState(1);
