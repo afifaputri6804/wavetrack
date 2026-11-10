@@ -55,6 +55,25 @@ type View = "ringkasan" | "materi" | "petunjuk" | "lab" | "kps" | "evaluasi" | "
 const titles: Record<View, string> = { ringkasan: "Beranda", materi: "Materi pembelajaran", petunjuk: "Petunjuk praktikum", lab: "Virtual Laboratory", kps: "Lembar kerja KPS", evaluasi: "Evaluasi", profil: "Profil", monitoring: "Monitoring siswa", pengelolaan: "Pengelolaan virtual lab", penugasan: "Pengelolaan penugasan" };
 const defaultUser: User = { role: "siswa", name: "Nadia Putri", className: "XI IPA 1", email: "nadia@sekolah.sch.id", authSource: "demo" };
 
+// Penanda sesi per tab: tetap ada saat refresh, tetapi umumnya hilang saat tab ditutup.
+const TAB_SESSION_KEY = "wavetrack-tab-session";
+const DEMO_USER_SESSION_KEY = "wavetrack-user";
+const CURRENT_VIEW_SESSION_KEY = "wavetrack-current-view";
+
+// Hanya pulihkan halaman yang memang boleh diakses oleh peran pengguna.
+function getSavedViewForRole(role: Role): View {
+  const allowedViews: View[] = role === "siswa"
+    ? ["ringkasan", "materi", "petunjuk", "lab", "kps", "evaluasi", "profil"]
+    : ["ringkasan", "monitoring", "pengelolaan", "penugasan", "profil"];
+
+  try {
+    const savedView = window.sessionStorage.getItem(CURRENT_VIEW_SESSION_KEY);
+    return allowedViews.includes(savedView as View) ? savedView as View : "ringkasan";
+  } catch {
+    return "ringkasan";
+  }
+}
+
 function mapDatabaseRole(value: string | null): Role | null {
   if (!value) return null;
   if (["students", "student", "siswa"].includes(value)) return "siswa";
@@ -102,6 +121,34 @@ export default function WaveLab() {
     document.documentElement.dataset.theme = initialTheme;
     void (async () => {
       try {
+        // Pulihkan sesi hanya jika jenis navigasinya benar-benar refresh.
+        // Navigasi baru ke URL (misalnya klik link atau buka tab baru) selalu mulai dari login.
+        const navigationEntry = window.performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+        const isPageRefresh = navigationEntry?.type === "reload";
+        const hasActiveTabSession = isPageRefresh && window.sessionStorage.getItem(TAB_SESSION_KEY) === "active";
+        if (!hasActiveTabSession) {
+          window.sessionStorage.removeItem(TAB_SESSION_KEY);
+          window.sessionStorage.removeItem(DEMO_USER_SESSION_KEY);
+          window.sessionStorage.removeItem(CURRENT_VIEW_SESSION_KEY);
+          try { window.localStorage.removeItem(DEMO_USER_SESSION_KEY); } catch { /* ignore legacy demo session */ }
+          return;
+        }
+
+        // Hapus sesi demo lama yang sebelumnya tersimpan permanen di localStorage.
+        try { window.localStorage.removeItem(DEMO_USER_SESSION_KEY); } catch { /* ignore unavailable local storage */ }
+
+        // Jika tab ini terakhir masuk menggunakan akun demo, pulihkan sesi demo tersebut.
+        const storedDemo = window.sessionStorage.getItem(DEMO_USER_SESSION_KEY);
+        if (storedDemo) {
+          const parsed = JSON.parse(storedDemo) as User;
+          if (parsed && (parsed.role === "siswa" || parsed.role === "guru") && parsed.authSource === "demo" && typeof parsed.email === "string") {
+            setView(getSavedViewForRole(parsed.role));
+            setUser(parsed);
+            return;
+          }
+          window.sessionStorage.removeItem(DEMO_USER_SESSION_KEY);
+        }
+
         const supabase = createClient();
         const { data: { user: authUser }, error: authError } = await Promise.race([
           supabase.auth.getUser(),
@@ -119,16 +166,19 @@ export default function WaveLab() {
             .single();
 
           if (profileError || !profile) {
-            setError("Profil akun tidak ditemukan di tabel profiles.");
+            window.sessionStorage.removeItem(TAB_SESSION_KEY);
+            setError("Profil akun tidak ditemukan di tabel profiles. Silakan masuk kembali.");
             return;
           }
 
           const role = mapDatabaseRole(profile.role);
           if (!role) {
+            window.sessionStorage.removeItem(TAB_SESSION_KEY);
             setError("Peran akun belum dikenali. Hubungi pengelola WAVETRACK.");
             return;
           }
 
+          setView(getSavedViewForRole(role));
           setUser({
             role,
             name: profile.full_name || authUser.email?.split("@")[0] || "Pengguna",
@@ -139,16 +189,23 @@ export default function WaveLab() {
           return;
         }
 
-        const stored = localStorage.getItem("wavetrack-user");
-        if (stored) setUser(JSON.parse(stored));
+        window.sessionStorage.removeItem(TAB_SESSION_KEY);
       } catch {
+        // Jika pemeriksaan Supabase gagal, jangan memulihkan sesi Supabase yang belum tervalidasi.
+        // Sesi demo di tab yang sama masih dapat dipulihkan secara lokal.
         try {
-          const stored = localStorage.getItem("wavetrack-user");
-          if (stored) setUser(JSON.parse(stored));
-          else setError("Sesi belum dapat diperiksa. Silakan masuk kembali atau pilih mode demo.");
-        } catch {
-          setError("Sesi belum dapat diperiksa. Silakan masuk kembali atau pilih mode demo.");
-        }
+          const storedDemo = window.sessionStorage.getItem(DEMO_USER_SESSION_KEY);
+          if (storedDemo) {
+            const parsed = JSON.parse(storedDemo) as User;
+            if (parsed && (parsed.role === "siswa" || parsed.role === "guru") && parsed.authSource === "demo" && typeof parsed.email === "string") {
+              setView(getSavedViewForRole(parsed.role));
+              setUser(parsed);
+              return;
+            }
+          }
+        } catch { /* ignore invalid or unavailable session storage */ }
+        window.sessionStorage.removeItem(TAB_SESSION_KEY);
+        setError("Sesi akun belum dapat diperiksa. Silakan masuk kembali.");
       } finally {
         if (authTimeout !== undefined) window.clearTimeout(authTimeout);
         setAuthLoading(false);
@@ -175,6 +232,16 @@ export default function WaveLab() {
     } catch { /* ignore invalid report template */ }
     setStoredDataReady(true);
   }, []);
+
+  // Simpan halaman aktif di sessionStorage agar refresh kembali ke halaman yang sama.
+  // Penyimpanan hanya dilakukan setelah pengguna terautentikasi.
+  useEffect(() => {
+    if (!user) return;
+    try {
+      window.sessionStorage.setItem(CURRENT_VIEW_SESSION_KEY, view);
+    } catch { /* abaikan jika sessionStorage tidak tersedia */ }
+  }, [user, view]);
+
   useEffect(() => {
     if (user?.authSource !== "supabase" || user.role !== "siswa" || view !== "kps") return;
     let cancelled = false;
@@ -242,14 +309,23 @@ export default function WaveLab() {
   useEffect(() => { if (storedDataReady) localStorage.setItem("wavetrack-students", JSON.stringify(students)); }, [students, storedDataReady]);
   useEffect(() => { if (storedDataReady) localStorage.setItem("wavetrack-reports", JSON.stringify(reports)); }, [reports, storedDataReady]);
 
-  function login(e: FormEvent) {
+  async function login(e: FormEvent) {
     e.preventDefault(); setError("");
     if (password.length < 4) { setError("Kata sandi demo minimal 4 karakter."); return; }
     const clean = email.trim();
     if (!clean.includes("@")) { setError("Masukkan alamat email yang valid."); return; }
     const namePart = clean.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
     const next: User = loginRole === "guru" ? { role: "guru", name: namePart || "Guru Fisika", email: clean, authSource: "demo" } : { role: "siswa", name: namePart || "Siswa", className: "XI IPA 1", email: clean, authSource: "demo" };
-    setUser(next); localStorage.setItem("wavetrack-user", JSON.stringify(next)); setView("ringkasan");
+    // Pastikan sesi akun Supabase lama tidak mengambil alih sesi demo setelah refresh.
+    try { await createClient().auth.signOut(); } catch { /* abaikan jika belum ada sesi Supabase */ }
+    try {
+      window.sessionStorage.setItem(TAB_SESSION_KEY, "active");
+      window.sessionStorage.setItem(DEMO_USER_SESSION_KEY, JSON.stringify(next));
+      window.sessionStorage.setItem(CURRENT_VIEW_SESSION_KEY, "ringkasan");
+      window.localStorage.removeItem(DEMO_USER_SESSION_KEY);
+    } catch { /* login tetap berlaku sampai halaman ditutup jika storage tidak tersedia */ }
+    setUser(next);
+    setView("ringkasan");
   }
 
   async function loginAkun(e: FormEvent) {
@@ -278,6 +354,13 @@ export default function WaveLab() {
         return;
       }
 
+      try {
+        window.sessionStorage.setItem(TAB_SESSION_KEY, "active");
+        window.sessionStorage.removeItem(DEMO_USER_SESSION_KEY);
+        window.sessionStorage.setItem(CURRENT_VIEW_SESSION_KEY, "ringkasan");
+        window.localStorage.removeItem(DEMO_USER_SESSION_KEY);
+      } catch { /* sesi Supabase tetap dikelola oleh Supabase */ }
+
       setUser({
         role,
         name: profile.full_name || data.user.email?.split("@")[0] || "Pengguna",
@@ -292,10 +375,19 @@ export default function WaveLab() {
   }
 
   async function logout() {
-    if (user?.authSource === "supabase") await createClient().auth.signOut();
-    localStorage.removeItem("wavetrack-user");
-    setUser(null);
-    setView("ringkasan");
+    try {
+      if (user?.authSource === "supabase") await createClient().auth.signOut();
+    } catch { /* sesi lokal tetap diakhiri meskipun permintaan signOut gagal */ }
+    finally {
+      try {
+        window.sessionStorage.removeItem(TAB_SESSION_KEY);
+        window.sessionStorage.removeItem(DEMO_USER_SESSION_KEY);
+        window.sessionStorage.removeItem(CURRENT_VIEW_SESSION_KEY);
+        window.localStorage.removeItem(DEMO_USER_SESSION_KEY);
+      } catch { /* ignore unavailable browser storage */ }
+      setUser(null);
+      setView("ringkasan");
+    }
   }
   async function saveKps() {
     if (user?.authSource !== "supabase") {
@@ -370,7 +462,12 @@ export default function WaveLab() {
         {view === "monitoring" && <Monitoring students={students} setStudents={setStudents} reports={reports} setReports={setReports}/>}
         {view === "pengelolaan" && <LabManagement open={labOpen} setOpen={setLabOpen}/>}
         {view === "penugasan" && <AssignmentManagement reportTemplate={reportTemplate} setReportTemplate={setReportTemplate} saveReportTemplate={saveReportTemplate} templateSaved={templateSaved} setTemplateSaved={setTemplateSaved} quizQuestions={quizDraftQuestions} setQuizQuestions={questions=>{setQuizDraftQuestions(questions);setQuizSaved(false)}} saveQuizQuestions={()=>{localStorage.setItem("wavetrack-quiz-questions",JSON.stringify(quizDraftQuestions));setQuizQuestions(quizDraftQuestions);setQuiz({});setSubmitted(false);setQuizSaved(true)}} quizSaved={quizSaved}/> }
-        {view === "profil" && <Profile user={user} setUser={next => {setUser(next); if (user.authSource !== "supabase") localStorage.setItem("wavetrack-user", JSON.stringify(next));}}/>}
+        {view === "profil" && <Profile user={user} setUser={next => {
+          setUser(next);
+          if (user.authSource !== "supabase") {
+            try { window.sessionStorage.setItem(DEMO_USER_SESSION_KEY, JSON.stringify(next)); } catch { /* ignore unavailable session storage */ }
+          }
+        }}/> }
       </main>
     </div>
     {mobileMoreOpen && <button type="button" aria-label="Tutup menu" onClick={() => setMobileMoreOpen(false)} className="fixed inset-0 z-20 bg-slate-950/10 lg:hidden" />}
@@ -397,7 +494,7 @@ function ThemeToggle({theme,onToggle}:{theme:"light"|"dark";onToggle:()=>void}) 
 }
 
 function Login({login,loginAkun,role,setRole,email,setEmail,password,setPassword,error,theme,toggleTheme}: {login:(e:FormEvent)=>void;loginAkun:(e:FormEvent)=>void;role:Role;setRole:(v:Role)=>void;email:string;setEmail:(v:string)=>void;password:string;setPassword:(v:string)=>void;error:string;theme:"light"|"dark";toggleTheme:()=>void}) {
-  const [mode, setMode] = useState<"demo" | "akun">("demo");
+  const [mode, setMode] = useState<"demo" | "akun">("akun");
   const submit = mode === "demo" ? login : loginAkun;
 
   return <main className="login-shell grid min-h-screen bg-white lg:grid-cols-[1.05fr_.95fr]">
